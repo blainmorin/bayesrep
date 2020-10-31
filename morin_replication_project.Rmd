@@ -14,6 +14,7 @@ library(tidyverse)
 library(rstan)
 library(knitr)
 library(readxl)
+library(stargazer)
 df <- read_excel("Dare_geocoded.xls")
 
 
@@ -39,13 +40,39 @@ In the published paper, the authors use a matching algorithm to match houses in 
 ```{r}
 
 df1 = df %>%
-  mutate(nourish = ifelse(city == "NAGS HEAD", 1, 0)) %>%
-  mutate(PostNourish = ifelse(sale_year > 2010, 1, 0))
+  mutate(Nourish = ifelse(city == "NAGS HEAD", 1, 0)) %>%
+  mutate(PostNourish = ifelse(sale_year > 2010, 1, 0)) %>%
+  mutate(age = sale_year - year_built) %>%
+  mutate(sale_year = as.factor(sale_year)) 
+  
 
 ```
 
 ```{r}
 
+model1 = lm(log(price) ~ bathroom + sqft + I(sqft^2) + age + stry + I(dist_Shoreline_m / 10) + OceanFront + Nourish + PostNourish + Nourish*PostNourish + city + sale_year, data = df1)
 
+```
+
+```{r, results='asis'}
+
+stargazer(model1, header = FALSE,
+          title = "OLS Regression Results",
+          add.lines = list(c("Town Fixed Effects?", "Yes"), c("Year Fixed Effects?", "Yes")),
+          omit = c("sale", "city"),
+          dep.var.labels = "ln(Sale Price)",
+          covariate.labels = c(
+            "\\# of Bathrooms",
+            "Living Area (100 Sqft)",
+            "Living Area Squared",
+            "Age of Property (Years)",
+            "\\# of Stories",
+            "Distance to Shoreline (10m)",
+            "Ocean Front = Yes",
+            "Nourish",
+            "PostNourish",
+            "Nourish*PostNourish"
+          )
+          )
 
 ```
