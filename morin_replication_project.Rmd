@@ -76,3 +76,22 @@ stargazer(model1, header = FALSE,
           )
 
 ```
+
+# Bayesian Estimation Results
+
+```{r}
+
+pricemodel = model.frame(log(price) ~ bathroom + sqft + I(sqft^2) + age + stry + I(dist_Shoreline_m / 10) + OceanFront + Nourish + PostNourish + Nourish*PostNourish + city + sale_year, data = df1)
+
+price.data = list(y = model.response(pricemodel), x = model.matrix(pricemodel, pricemodel))
+price.data$N = nrow(price.data$x)
+price.data$K = ncol(price.data$x)
+
+```
+
+```{r, cache = TRUE}
+
+options(mc.cores = parallel::detectCores())
+price.fit = stan("ols.stan", data = price.data, seed = 1234, iter = 4000)
+
+```
