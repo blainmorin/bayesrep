@@ -12,6 +12,8 @@ urlcolor: blue
 
 knitr::opts_chunk$set(echo = FALSE)
 
+### Load required packages
+
 library(tidyverse)
 library(rstan)
 library(knitr)
@@ -22,6 +24,8 @@ library(readxl)
 library(gridExtra)
 library(kableExtra)
 library(stargazer)
+
+### Read in data
 df <- read_excel("Dare_geocoded.xls")
 
 
@@ -29,23 +33,25 @@ df <- read_excel("Dare_geocoded.xls")
 
 # Background and Overview 
 
-This project replicates the difference-in-differences model estimated in Qiu and Gopalakrishnan's 2018 paper, "Shoreline defense against climate change and capitalized impact of beach nourishment" using a Bayesian framework [(link to paper)](http://dx.doi.org/10.1016/j.jeem.2018.08.013). The paper evaluates the impact of beach nourishment (which is "the process of replacing an eroding section of a beach with sand dredged from inlets or offshore sand reserves") on coastal housing prices. The analysis focuses on on island in the Outer Banks of North Carolina. Here is the map of the area analyzed for reference:
+This project replicates the difference-in-differences model estimated in Qiu and Gopalakrishnan's 2018 paper, "Shoreline defense against climate change and capitalized impact of beach nourishment" using a Bayesian framework [(link to paper)](http://dx.doi.org/10.1016/j.jeem.2018.08.013). The paper evaluates the impact of beach nourishment (which is "the process of replacing an eroding section of a beach with sand dredged from inlets or offshore sand reserves") on coastal housing prices. The analysis focuses on islands in the Outer Banks of North Carolina. Here is the map of the area analyzed for reference:
 
 ```{r, out.width = "32%", fig.align="center"}
+### Add map graphic
 include_graphics("beach.PNG") 
 ```
 
 In the analysis, the authors compare the trend in sale prices of homes in Nags Head (the town that received beach nourishment) to the trend of sale prices in Duck and Kitty Hawk (which are towns that didn't receive beach nourishment until a few years after Nags Head). Here, receiving the beach nourishment is considered the treatment. The authors' diff-in-diff model takes the form:
 
 $$ ln(P_{ijt}) = \alpha_0 + \alpha_1X_i + \beta_1Nourish + \beta_2PostNourish  + \beta_3Nourish*PostNourish + \eta_j + \zeta_t + \epsilon_{ijt}   $$
-where $P_{ijt}$ is the price of home $i$ in location $j$ sold in year $t$. $X_i$ is a vector of control variables for housing characteristics. $Nourish$ is an indicator variable for being in the treatment group. The main coefficient of interest is $\beta_3$, which is the average treatment effect of beach nourishment. The authors also include census block group and year fixed effects ($\eta_j$ and $\zeta_t$ respectively). 
+where $P_{ijt}$ is the price of home $i$ in location $j$ sold in year $t$. $X_i$ is a vector of control variables for housing characteristics. $Nourish$ is an indicator variable for being in the treatment group. $PostNourish$ is an indicator that an observation is post treatment. The main coefficient of interest is $\beta_3$, which is the average treatment effect of beach nourishment. The authors also include census block group and year fixed effects ($\eta_j$ and $\zeta_t$ respectively). 
 
 # OLS Estimation Results
 
-In the published paper, the authors use year fixed effects as well as seasonal fixed effects. Including the year fixed effect causes collinearity problems when I try to replicate their analysis (in other words the year fixed effects are collinear with the $PostNorish$ covariate, which is an indicator variable that = 1 when the year is greater than 2010). I also tried to filter the data based on the authors description, but am not able to exactly match their sample size. OLS regression results are presented in Table 1.  
+In the published paper, the authors use year fixed effects. Including the year fixed effect causes collinearity problems when I try to replicate their analysis (in other words the year fixed effects are collinear with the $PostNorish$ covariate, which is an indicator variable that = 1 when the year is greater than 2010). I also tried to filter the data based on the authors description, but am not able to exactly match their sample size. OLS regression results are presented in Table 1.  
 
 ```{r}
 
+### Filter and clean the data according to authors' description
 df1 = df %>%
   filter(sale_year >= 2008) %>%
   filter(sale_year <= 2014) %>%
@@ -62,12 +68,14 @@ df1 = df %>%
 
 ```{r}
 
+### Specify the lm model
 model1 = lm(log(price) ~ bathroom + sqft + I(sqft^2) + age + stry + I(dist_Shoreline_m / 10) + OceanFront + Nourish*PostNourish + as.factor(blkgrp), data = df1)
 
 ```
 
 ```{r, results='asis', eval=FALSE}
 
+### Make a regression table
 stargazer(model1, header = FALSE,
           title = "OLS Regression Results",
           single.row = TRUE,
@@ -151,11 +159,14 @@ model {
 
 ```
 
-This model was run with 4 chains, each with 2000 iterations. A flat prior was used because of lack of prior information. The x matrix contains all of the housing covariates as well as the year and location fixed effects. Table 2 presents the summary results for the non-fixed effect variables.
+This model was run with 4 chains, each with 4000 iterations. A flat prior was used because of lack of prior information. The x matrix contains all of the housing covariates as well as location fixed effects. Table 2 presents the summary results for the non-fixed effect variables.
 
 ```{r}
-
-pricemodel = model.frame(log(price) ~ bathroom + sqft + I(sqft^2) + age + stry + I(dist_Shoreline_m / 10) + OceanFront + Nourish*PostNourish + as.factor(blkgrp), data = df1)
+### Create the data list for stan
+pricemodel = model.frame(log(price) ~ bathroom + 
+                           sqft + I(sqft^2) + age + stry +
+                           I(dist_Shoreline_m / 10) + OceanFront + Nourish*PostNourish + 
+                           as.factor(blkgrp), data = df1)
 
 price.data = list(y = model.response(pricemodel), x = model.matrix(pricemodel, pricemodel))
 price.data$N = nrow(price.data$x)
@@ -164,6 +175,8 @@ price.data$K = ncol(price.data$x)
 ```
 
 ```{r}
+
+### Runs the final model specification
 # options(mc.cores = parallel::detectCores())
 # price.fit = stan("ols.stan", data = price.data, seed = 134, iter = 4000, chains = 4)
 # save(price.fit, file = "finalmodel5")
@@ -200,56 +213,16 @@ df3$term = c(
             "lp_"
           )
 
+### Makes a table of results
+
 df3 %>%
-  kable(booktabs = T, row.names = FALSE, linesep = "", caption = "Bayesian Estimation Results") %>%
+  kable(booktabs = T, row.names = FALSE,
+        linesep = "", caption = "Bayesian Estimation Results") %>%
   kable_styling(latex_options = "HOLD_position")
 
 ```
 
 
-```{r}
-# 
-# options(mc.cores = parallel::detectCores())
-# price.fit = stan("ols.stan", data = price.data, seed = 134, iter = 4000, chains = 4)
-# save(price.fit, file = "finalmodel2")
-# 
-# load("finalmodel2")
-# 
-# price.fit.summary = round(summary(price.fit)$summary, 4)
-# price.fit.summary = as.data.frame(price.fit.summary)
-# 
-# term = c(colnames(price.data$x), "sigma", "lp__")
-# 
-# price.fit.summary = cbind(term, price.fit.summary)
-# 
-# df2 = price.fit.summary %>%
-#   select(term, mean, sd, n_eff, Rhat)
-# 
-# df2 = df2[c(1:10, 30:32),]
-# 
-# df3 = df2 
-# 
-# df3$term = c(
-#             "Constant",
-#             "# of Bathrooms",
-#             "Living Area (100 Sqft)",
-#             "Living Area Squared",
-#             "Age of Property (Years)",
-#             "# of Stories",
-#             "Distance to Shoreline (10m)",
-#             "Ocean Front = Yes",
-#             "Nourish",
-#             "PostNourish",
-#             "Nourish*PostNourish",
-#             "Sigma",
-#             "lp_"
-#           )
-# 
-# df3 %>%
-#   kable(booktabs = T, row.names = FALSE, linesep = "", caption = "Bayesian Estimation Results") %>%
-#   kable_styling(latex_options = "HOLD_position")
-
-```
 
 Looking at the summary results in Table 2, the effective sample and chain mixing (seen in the n_eff and Rhat columns, respectively) are sufficient for all variables. The estimated coefficients are also similar to the OLS specification.
 
@@ -318,7 +291,7 @@ grid.arrange(a, b, c, d, e, f, g, h, i, j, k, l, ncol = 2, top = "Figure 1: MCMC
 
 ```
 
-Figure 1 plots the MCMC chains for the variables of interest. As expected, the chains are mixing well and are bouncing around a narrow area. 
+Figure 1 plots the MCMC chains for the variables of interest. As expected from the Rhat values in Table 1, the chains are mixing well and are bouncing around a narrow area. 
 
 # Estimate Comparison
 
@@ -364,9 +337,84 @@ m1_df$term = m2_df$term
 two_models = rbind(m1_df, m2_df)
 
 
-dwplot(two_models) + 
+dwplot(two_models, whisker_args = list(size = 1.2), dot_args = list(size = 1.5)) + 
   theme_bw() +
   xlab("Coefficient Estimate") +
-  ggtitle("OLS versus Bayes Estimates") +
-  scale_color_discrete()
+  ggtitle("Figure 2: OLS versus Bayes Estimates") +
+  scale_color_discrete(name = "Model") +
+  theme(legend.position = c(.85, .15),
+        legend.background = element_rect(color = "black"),
+        legend.title.align = .5)
+```
+
+Overall, the model form in Qiu and Gopalakrishnan (2018) is relatively uncomplicated and starightforward. As seen in Figure 2, the confidence intervals and point estimates for each of the covariates are almost identical. 
+
+In Qiu and Gopalakrishnan's specification, they included year fixed effects. However, the post nourishment variable (which is an indicator for post treatment) is collinear with these year fixed effects. In Table 3, I show that the $PostNourish$ variable is perfectly predicted by these fixed effect variables. The model can run without producing warning using the lm function in R, if the dummy variables are not treated as factors. However, in the Bayesian framework, the MCMC chains do not mix and the number of effective samples drop dramatically. In sum, although the estimates are similar, on of the strengths of the Bayes approach is that it helps bring to light model misspecifocation.  
+
+```{r, results = 'asis', eval = FALSE}
+
+pricemodel = model.frame(log(price) ~ bathroom +
+                           sqft + I(sqft^2) + age + stry + I(dist_Shoreline_m / 10) +
+                           OceanFront + Nourish*PostNourish + as.factor(blkgrp) + sale_year, data = df1)
+
+price.data = list(y = model.response(pricemodel), x = model.matrix(pricemodel, pricemodel))
+
+
+tester = as.data.frame(price.data$x)
+
+tester = tester[, c(10, 21:26)]
+
+tester2 = lm(PostNourish1 ~ ., data = tester)
+
+stargazer(tester2, header = FALSE,
+          title = "Collinearity Between Year Fixed Effects and Post-Nourishment")
+
+
+```
+\begin{table}[H] \centering 
+  \caption{Collinearity Between Year Fixed Effects and Post-Nourishment} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lc} 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{1}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-2} 
+\\[-1.8ex] & PostNourish1 \\ 
+\hline \\[-1.8ex] 
+ sale\_year2009 & 0.000$^{***}$ \\ 
+  & (0.000) \\ 
+  & \\ 
+ sale\_year2010 & 0.000$^{***}$ \\ 
+  & (0.000) \\ 
+  & \\ 
+ sale\_year2011 & 1.000$^{***}$ \\ 
+  & (0.000) \\ 
+  & \\ 
+ sale\_year2012 & 1.000$^{***}$ \\ 
+  & (0.000) \\ 
+  & \\ 
+ sale\_year2013 & 1.000$^{***}$ \\ 
+  & (0.000) \\ 
+  & \\ 
+ sale\_year2014 & 1.000$^{***}$ \\ 
+  & (0.000) \\ 
+  & \\ 
+ Constant & $-$0.000$^{***}$ \\ 
+  & (0.000) \\ 
+  & \\ 
+\hline \\[-1.8ex] 
+Observations & 2,095 \\ 
+R$^{2}$ & 1.000 \\ 
+Adjusted R$^{2}$ & 1.000 \\ 
+Residual Std. Error & 0.000 (df = 2088) \\ 
+F Statistic & 159,413,924,907,095,343,184,880,202,066.000$^{***}$ (df = 6; 2088) \\ 
+\hline 
+\hline \\[-1.8ex] 
+\textit{Note:}  & \multicolumn{1}{r}{$^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01} \\ 
+\end{tabular} 
+\end{table} 
+
+# Appendix: Project Code
+
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
 ```
