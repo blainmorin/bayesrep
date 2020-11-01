@@ -2,6 +2,8 @@
 title: "Replication Project"
 author: "Blain Morin"
 date: "10/30/2020"
+header-includes:
+  - \usepackage{float}
 output: pdf_document
 urlcolor: blue
 ---
@@ -13,7 +15,12 @@ knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 library(rstan)
 library(knitr)
+library(dotwhisker)
+library(broom)
+library(bayesplot)
 library(readxl)
+library(gridExtra)
+library(kableExtra)
 library(stargazer)
 df <- read_excel("Dare_geocoded.xls")
 
@@ -30,36 +37,42 @@ include_graphics("beach.PNG")
 
 In the analysis, the authors compare the trend in sale prices of homes in Nags Head (the town that received beach nourishment) to the trend of sale prices in Duck and Kitty Hawk (which are towns that didn't receive beach nourishment until a few years after Nags Head). Here, receiving the beach nourishment is considered the treatment. The authors' diff-in-diff model takes the form:
 
-$$ ln(P_{ijt}) = \alpha_0 + \alpha_1X_i + \beta_1Nourish + \beta_2Nourish*PostNourish + \eta_j + \zeta_t + \epsilon_{ijt}   $$
-where $P_{ijt}$ is the price of home $i$ in location $j$ sold in year $t$. $X_i$ is a vector of control variables for housing characteristics. $Nourish$ is an indicator variable for being in the treatment group. The main coefficient of interest is $\beta_2$, which is the average treatment effect of beach nourishment. The authors also include town and year fixed effects ($\eta_j$ and $\zeta_t$ respectively). 
+$$ ln(P_{ijt}) = \alpha_0 + \alpha_1X_i + \beta_1Nourish + \beta_2PostNourish  + \beta_3Nourish*PostNourish + \eta_j + \zeta_t + \epsilon_{ijt}   $$
+where $P_{ijt}$ is the price of home $i$ in location $j$ sold in year $t$. $X_i$ is a vector of control variables for housing characteristics. $Nourish$ is an indicator variable for being in the treatment group. The main coefficient of interest is $\beta_3$, which is the average treatment effect of beach nourishment. The authors also include census block group and year fixed effects ($\eta_j$ and $\zeta_t$ respectively). 
 
 # OLS Estimation Results
 
-In the published paper, the authors use a matching algorithm to match houses in the treatment group to comparable houses in the control group. I do not have access to the matching code or matched data set. For the puposes of this paper, I estimate the model across all observations. 
+In the published paper, the authors use year fixed effects as well as seasonal fixed effects. Including the year fixed effect causes collinearity problems when I try to replicate their analysis (in other words the year fixed effects are collinear with the $PostNorish$ covariate, which is an indicator variable that = 1 when the year is greater than 2010). I also tried to filter the data based on the authors description, but am not able to exactly match their sample size. OLS regression results are presented in Table 1.  
 
 ```{r}
 
 df1 = df %>%
+  filter(sale_year >= 2008) %>%
+  filter(sale_year <= 2014) %>%
+  filter(dist_Shoreline_m < 2000) %>%
   mutate(Nourish = ifelse(city == "NAGS HEAD", 1, 0)) %>%
   mutate(PostNourish = ifelse(sale_year > 2010, 1, 0)) %>%
   mutate(age = sale_year - year_built) %>%
-  mutate(sale_year = as.factor(sale_year)) 
+  mutate(sale_year = as.factor(sale_year)) %>%
+  mutate(Nourish = as.factor(Nourish)) %>%
+  mutate(PostNourish = as.factor(PostNourish))
   
 
 ```
 
 ```{r}
 
-model1 = lm(log(price) ~ bathroom + sqft + I(sqft^2) + age + stry + I(dist_Shoreline_m / 10) + OceanFront + Nourish + PostNourish + Nourish*PostNourish + city + sale_year, data = df1)
+model1 = lm(log(price) ~ bathroom + sqft + I(sqft^2) + age + stry + I(dist_Shoreline_m / 10) + OceanFront + Nourish*PostNourish + as.factor(blkgrp), data = df1)
 
 ```
 
-```{r, results='asis'}
+```{r, results='asis', eval=FALSE}
 
 stargazer(model1, header = FALSE,
           title = "OLS Regression Results",
-          add.lines = list(c("Town Fixed Effects?", "Yes"), c("Year Fixed Effects?", "Yes")),
-          omit = c("sale", "city"),
+          single.row = TRUE,
+          add.lines = list(c("Location Fixed Effects?", "Yes"), c("Year Fixed Effects?", "No")),
+          omit = c("blkgrp"),
           dep.var.labels = "ln(Sale Price)",
           covariate.labels = c(
             "\\# of Bathrooms",
@@ -77,11 +90,72 @@ stargazer(model1, header = FALSE,
 
 ```
 
+\begin{table}[H] \centering 
+  \caption{OLS Regression Results} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lc} 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{1}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-2} 
+\\[-1.8ex] & ln(Sale Price) \\ 
+\hline \\[-1.8ex] 
+ \# of Bathrooms & 0.054$^{***}$ (0.009) \\ 
+  Living Area (100 Sqft) & 0.040$^{***}$ (0.003) \\ 
+  Living Area Squared & $-$0.0004$^{***}$ (0.0001) \\ 
+  Age of Property (Years) & $-$0.005$^{***}$ (0.0004) \\ 
+  \# of Stories & 0.091$^{***}$ (0.013) \\ 
+  Distance to Shoreline (10m) & $-$0.002$^{***}$ (0.0002) \\ 
+  Ocean Front = Yes & 0.330$^{***}$ (0.025) \\ 
+  Nourish & $-$0.135 (0.134) \\ 
+  PostNourish & $-$0.049$^{***}$ (0.013) \\ 
+  Nourish*PostNourish & $-$0.004 (0.022) \\ 
+  Constant & 12.074$^{***}$ (0.057) \\ 
+ \hline \\[-1.8ex] 
+Location Fixed Effects? & Yes \\ 
+Year Fixed Effects? & No \\ 
+Observations & 2,095 \\ 
+R$^{2}$ & 0.747 \\ 
+Adjusted R$^{2}$ & 0.744 \\ 
+Residual Std. Error & 0.230 (df = 2074) \\ 
+F Statistic & 305.602$^{***}$ (df = 20; 2074) \\ 
+\hline 
+\hline \\[-1.8ex] 
+\textit{Note:}  & \multicolumn{1}{r}{$^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01} \\ 
+\end{tabular} 
+\end{table} 
+
 # Bayesian Estimation Results
+
+In this section, I replicate the analysis using rstan. Here is the specification in the .stan file:
+
+```{r, echo = TRUE, eval = FALSE}
+
+data {
+  int<lower=0> N;
+  int<lower=1> K;
+  matrix[N,K] x;
+  vector[N] y;
+}
+
+parameters {
+  vector[K] beta;
+  real<lower=0> sigma;
+}
+
+model {
+  y ~ normal(x * beta, sigma);
+}
+
+
+
+```
+
+This model was run with 4 chains, each with 2000 iterations. A flat prior was used because of lack of prior information. The x matrix contains all of the housing covariates as well as the year and location fixed effects. Table 2 presents the summary results for the non-fixed effect variables.
 
 ```{r}
 
-pricemodel = model.frame(log(price) ~ bathroom + sqft + I(sqft^2) + age + stry + I(dist_Shoreline_m / 10) + OceanFront + Nourish + PostNourish + Nourish*PostNourish + city + sale_year, data = df1)
+pricemodel = model.frame(log(price) ~ bathroom + sqft + I(sqft^2) + age + stry + I(dist_Shoreline_m / 10) + OceanFront + Nourish*PostNourish + as.factor(blkgrp), data = df1)
 
 price.data = list(y = model.response(pricemodel), x = model.matrix(pricemodel, pricemodel))
 price.data$N = nrow(price.data$x)
@@ -89,9 +163,210 @@ price.data$K = ncol(price.data$x)
 
 ```
 
-```{r, cache = TRUE}
+```{r}
+# options(mc.cores = parallel::detectCores())
+# price.fit = stan("ols.stan", data = price.data, seed = 134, iter = 4000, chains = 4)
+# save(price.fit, file = "finalmodel5")
 
-options(mc.cores = parallel::detectCores())
-price.fit = stan("ols.stan", data = price.data, seed = 1234, iter = 4000)
+load("finalmodel5")
 
+price.fit.summary = round(summary(price.fit)$summary, 4)
+price.fit.summary = as.data.frame(price.fit.summary)
+
+term = c(colnames(price.data$x), "sigma", "lp__")
+
+price.fit.summary = cbind(term, price.fit.summary)
+
+df2 = price.fit.summary %>%
+  select(term, mean, sd, n_eff, Rhat)
+
+df2 = df2[c(1:10, 21:23),]
+
+df3 = df2 
+
+df3$term = c(
+            "Constant",
+            "# of Bathrooms",
+            "Living Area (100 Sqft)",
+            "Living Area Squared",
+            "Age of Property (Years)",
+            "# of Stories",
+            "Distance to Shoreline (10m)",
+            "Ocean Front = Yes",
+            "Nourish",
+            "PostNourish",
+            "Nourish*PostNourish",
+            "Sigma",
+            "lp_"
+          )
+
+df3 %>%
+  kable(booktabs = T, row.names = FALSE, linesep = "", caption = "Bayesian Estimation Results") %>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+
+```{r}
+# 
+# options(mc.cores = parallel::detectCores())
+# price.fit = stan("ols.stan", data = price.data, seed = 134, iter = 4000, chains = 4)
+# save(price.fit, file = "finalmodel2")
+# 
+# load("finalmodel2")
+# 
+# price.fit.summary = round(summary(price.fit)$summary, 4)
+# price.fit.summary = as.data.frame(price.fit.summary)
+# 
+# term = c(colnames(price.data$x), "sigma", "lp__")
+# 
+# price.fit.summary = cbind(term, price.fit.summary)
+# 
+# df2 = price.fit.summary %>%
+#   select(term, mean, sd, n_eff, Rhat)
+# 
+# df2 = df2[c(1:10, 30:32),]
+# 
+# df3 = df2 
+# 
+# df3$term = c(
+#             "Constant",
+#             "# of Bathrooms",
+#             "Living Area (100 Sqft)",
+#             "Living Area Squared",
+#             "Age of Property (Years)",
+#             "# of Stories",
+#             "Distance to Shoreline (10m)",
+#             "Ocean Front = Yes",
+#             "Nourish",
+#             "PostNourish",
+#             "Nourish*PostNourish",
+#             "Sigma",
+#             "lp_"
+#           )
+# 
+# df3 %>%
+#   kable(booktabs = T, row.names = FALSE, linesep = "", caption = "Bayesian Estimation Results") %>%
+#   kable_styling(latex_options = "HOLD_position")
+
+```
+
+Looking at the summary results in Table 2, the effective sample and chain mixing (seen in the n_eff and Rhat columns, respectively) are sufficient for all variables. The estimated coefficients are also similar to the OLS specification.
+
+# Bayesian Diagnostics
+
+```{r}
+
+one.ten = c()
+
+for (i in c(1:10, 21)) {
+  
+  one.ten[i] = paste("beta[", i, "]", sep = "")
+  
+}
+
+
+ylabs = c(
+            "Constant",
+            "# of Bathrooms",
+            "Living Area",
+            "Living Area Squared",
+            "Age of Property",
+            "# of Stories",
+            "Distance to Shore",
+            "Ocean Front = Yes",
+            "Nourish",
+            "PostNourish",
+            "Nourish*PostNourish",
+            "Sigma",
+            "lp_"
+          )
+
+a = mcmc_trace(price.fit, one.ten[1]) + ylab(ylabs[1])
+
+b =mcmc_trace(price.fit, one.ten[2]) + ylab(ylabs[2])
+
+c = mcmc_trace(price.fit, one.ten[3]) + ylab(ylabs[3])
+
+d = mcmc_trace(price.fit, one.ten[4]) + ylab(ylabs[4])
+
+e = mcmc_trace(price.fit, one.ten[5]) + ylab(ylabs[5])
+
+f = mcmc_trace(price.fit, one.ten[6]) + ylab(ylabs[6])
+
+g = mcmc_trace(price.fit, one.ten[7]) + ylab(ylabs[7])
+
+h = mcmc_trace(price.fit, one.ten[8]) + ylab(ylabs[8])
+
+i = mcmc_trace(price.fit, one.ten[9]) + ylab(ylabs[9])
+
+j = mcmc_trace(price.fit, one.ten[10]) + ylab(ylabs[10])
+
+k = mcmc_trace(price.fit, one.ten[21]) + ylab(ylabs[11])
+
+l = mcmc_trace(price.fit, pars = "sigma") + ylab(ylabs[12])
+
+
+
+
+
+```
+
+```{r, fig.height=9}
+
+grid.arrange(a, b, c, d, e, f, g, h, i, j, k, l, ncol = 2, top = "Figure 1: MCMC Tracplots")
+
+```
+
+Figure 1 plots the MCMC chains for the variables of interest. As expected, the chains are mixing well and are bouncing around a narrow area. 
+
+# Estimate Comparison
+
+```{r}
+
+m1_df = tidy(model1) %>%
+  mutate(model = "OLS") %>%
+  filter(!grepl("as.factor", term)) 
+
+m1_df = m1_df[,-c(4,5)]
+
+m1_df$term = c("Constant",
+            "# of Bathrooms",
+            "Living Area",
+            "Living Area Squared",
+            "Age of Property",
+            "# of Stories",
+            "Distance to Shore",
+            "Ocean Front = Yes",
+            "Nourish",
+            "PostNourish",
+            "Nourish*PostNourish"
+          )
+
+m1_df = m1_df %>%
+  filter(term != "Constant")
+
+
+
+m2_df = df3[-c(12, 13),]
+
+rownames(m2_df) = NULL
+
+m2_df = m2_df %>%
+  rename(estimate = mean) %>%
+  rename(std.error = sd) %>%
+  mutate(model = "Bayesian") %>%
+  select(-c(n_eff, Rhat)) %>%
+  filter(term != "Constant")
+
+m1_df$term = m2_df$term
+
+two_models = rbind(m1_df, m2_df)
+
+
+dwplot(two_models) + 
+  theme_bw() +
+  xlab("Coefficient Estimate") +
+  ggtitle("OLS versus Bayes Estimates") +
+  scale_color_discrete()
 ```
